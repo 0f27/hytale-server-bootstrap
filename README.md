@@ -19,7 +19,7 @@ Run a single command and get a fully configured, containerised Hytale server wit
 
 ```bash
 mkdir hytale-server && cd hytale-server
-curl -O https://raw.githubusercontent.com/yourname/hytale-server/main/hytale-server-bootstrap.sh
+curl -O https://raw.githubusercontent.com/0f27/hytale-server-bootstrap/main/hytale-server-bootstrap.sh
 chmod +x hytale-server-bootstrap.sh
 ./hytale-server-bootstrap.sh
 ```
