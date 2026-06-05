@@ -1,0 +1,9 @@
+.dockerignore
+.hytale-downloader-credentials.json
+Assets.zip
+Dockerfile
+Server
+data
+start.*
+docker-compose.yml
+hytale-downloader-linux-amd64
