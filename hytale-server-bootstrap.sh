@@ -20,9 +20,22 @@
 #
 # Usage:
 #   chmod +x hytale-server-bootstrap.sh && ./hytale-server-bootstrap.sh
+#
+# Flags:
+#   --upgrade   Stop the server, remove old binaries, re-download and rebuild.
+#               Your world data in data/ is never touched.
 # =============================================================================
 
 set -euo pipefail
+
+# ── Flags ─────────────────────────────────────────────────────────────────────
+UPGRADE=false
+for arg in "$@"; do
+    case "$arg" in
+        --upgrade) UPGRADE=true ;;
+        *) die "Unknown argument: $arg. Usage: $0 [--upgrade]" ;;
+    esac
+done
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -56,6 +69,21 @@ echo -e "${BLU}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${BLU}  Hytale Server Bootstrap · CachyOS / Arch edition${NC}"
 echo -e "${BLU}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
+
+# ── 0. Upgrade mode — wipe old binaries so the downloader fetches fresh ones ──
+if [[ "$UPGRADE" == true ]]; then
+    step "Upgrade mode"
+    echo "  Stopping server (if running)..."
+    docker compose down 2>/dev/null || true
+
+    echo "  Removing old server binaries..."
+    rm -rf Server/ Assets.zip start.sh start.bat
+    rm -f "$DOWNLOADER_BIN"
+
+    ok "Old binaries removed. Proceeding with fresh download and rebuild."
+    echo "  Your world data in data/ is untouched."
+    echo ""
+fi
 
 # ── 1. Architecture guard ─────────────────────────────────────────────────────
 ARCH="$(uname -m)"
