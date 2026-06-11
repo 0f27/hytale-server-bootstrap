@@ -23,7 +23,7 @@
 #
 # Flags:
 #   --upgrade   Stop the server, remove old binaries, re-download and rebuild.
-#               Your world data in data/ is never touched.
+#               auth.key and world data in data/ are never touched.
 # =============================================================================
 
 set -euo pipefail
@@ -73,7 +73,9 @@ echo ""
 # ── 0. Upgrade mode — wipe old binaries so the downloader fetches fresh ones ──
 if [[ "$UPGRADE" == true ]]; then
     step "Upgrade mode"
-    echo "  Stopping server (if running)..."
+    # auth.key is bind-mounted as a file — it lives in data/auth/auth.key on the
+    # host and survives the rebuild automatically. No export/import needed.
+    echo "  Stopping server..."
     docker compose down 2>/dev/null || true
 
     echo "  Removing old server binaries..."
@@ -81,7 +83,7 @@ if [[ "$UPGRADE" == true ]]; then
     rm -f "$DOWNLOADER_BIN"
 
     ok "Old binaries removed. Proceeding with fresh download and rebuild."
-    echo "  Your world data in data/ is untouched."
+    echo "  Your world data and auth token in data/ are untouched."
     echo ""
 fi
 
@@ -345,6 +347,11 @@ services:
       - ./data/universe:/server/Server/universe
       # Periodic backups written by start.sh (--backup-dir backups)
       - ./data/backups:/server/Server/backups
+      # Auth token — single file bind mount so it persists across rebuilds.
+      # The file must exist on the host before container start (created below).
+      - type: bind
+        source: ./data/auth/auth.key
+        target: /server/Server/auth.key
     stdin_open: true
     tty: true
 EOF
@@ -376,6 +383,10 @@ for dir in universe backups; do
     mkdir -p "${DATA_DIR}/${dir}"
 done
 # UID 1500 = hytale user inside the container — must own all mounted dirs
+# auth.key must exist as a FILE before container start —
+# if Docker finds it missing it creates a directory instead, breaking the mount.
+mkdir -p "${DATA_DIR}/auth"
+touch "${DATA_DIR}/auth/auth.key"
 sudo chown -R 1500:1500 "${DATA_DIR}"
 ok "Persistent data directories ready under data/. (owned by UID 1500 — hytale)"
 

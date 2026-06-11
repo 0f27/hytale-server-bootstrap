@@ -184,7 +184,23 @@ This will:
 4. Rebuild the Docker image
 5. Start the server
 
+`auth.key` is a bind-mounted file in `data/auth/` — it survives the rebuild automatically.
+No re-authentication needed.
+
 Your world data in `data/` is never touched.
+
+---
+
+## Auth Key
+
+The server auth token is bind-mounted as a single file:
+```
+data/auth/auth.key  →  /server/Server/auth.key
+```
+
+Once you authenticate with `/auth login device`, the server writes the token directly
+into the mounted file — it's immediately on the host and persists across all restarts
+and rebuilds. You authenticate once per machine, and never again unless you delete `data/`.
 
 ---
 
@@ -203,10 +219,10 @@ docker compose logs -f
 # Attach to server console (detach with Ctrl+P Ctrl+Q)
 docker attach hytale-server
 
-# Upgrade to a new Hytale version
+# Upgrade to a new Hytale version (exports auth, rebuilds, restores auth)
 ./hytale-server-bootstrap.sh --upgrade
 
-# Re-authenticate after a full rebuild
+# Re-authenticate if token is missing or expired
 docker attach hytale-server
 # then: /auth login device
 ```
