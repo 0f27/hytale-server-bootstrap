@@ -386,7 +386,7 @@ done
 # auth.key must exist as a FILE before container start —
 # if Docker finds it missing it creates a directory instead, breaking the mount.
 mkdir -p "${DATA_DIR}/auth"
-touch "${DATA_DIR}/auth/auth.key"
+sudo touch "${DATA_DIR}/auth/auth.key"
 sudo chown -R 1500:1500 "${DATA_DIR}"
 ok "Persistent data directories ready under data/. (owned by UID 1500 — hytale)"
 
