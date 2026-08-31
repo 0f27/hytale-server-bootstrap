@@ -354,6 +354,12 @@ services:
         target: /server/Server/auth.key
     stdin_open: true
     tty: true
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
 EOF
     ok "docker-compose.yml written."
 else
