@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Hytale Server Bootstrap — CachyOS / Arch Linux edition
+# Hytale Server Bootstrap — Linux (Docker) + macOS (native) edition
 #
-# What this script does:
+# The script detects the host OS and picks the right runtime:
+#
+# Linux (CachyOS / Arch, x86_64):
 #   1. Installs missing dependencies via pacman (docker, wget, unzip, ufw)
 #   2. Ensures Docker daemon is running (systemd)
 #   3. Downloads the official Hytale Downloader from downloader.hytale.com
@@ -14,21 +16,40 @@
 #   8. Builds the Docker image and starts the server in the background
 #   9. Prints instructions for server auth, connecting and copying the folder
 #
+# macOS (Apple Silicon or Intel):
+#   1. Reuses Server/, Assets.zip and start.sh (copy them from the Linux
+#      machine, the Hytale launcher, or a JAR bootstrap install)
+#   2. Finds Java 25 or downloads Temurin 25 into .jdk/
+#   3. Links Server/universe, Server/backups and auth files to data/
+#   4. Tunes jvm.options for the Mac's RAM
+#   5. Starts the server natively (no Docker/Rosetta) in a screen session
+#
 # Requirements:
-#   - CachyOS (or any Arch-based distro) on x86_64
+#   - Linux: CachyOS or any Arch-based distro on x86_64, sudo access
+#   - macOS: macOS 13+, Java 25 (auto-downloaded on first run)
 #   - A Hytale account that owns the game (Standard Edition or higher)
-#   - sudo access
 #
 # Usage:
 #   chmod +x hytale-server-bootstrap.sh && ./hytale-server-bootstrap.sh
 #
 # Flags:
-#   --upgrade   Stop the server, download the latest Hytale build, rebuild and
-#               restart. World data and server auth in data/ are never touched.
-#   --no-ufw    Do not modify firewall rules.
+#   --upgrade   Linux: download the latest Hytale build, rebuild and restart.
+#               macOS: print Hytale's built-in /update steps (the official
+#               downloader has no macOS build).
+#   --stop      Stop the running server (Docker on Linux, screen on macOS).
+#   --no-ufw    Linux only: do not modify firewall rules.
 # =============================================================================
 
 set -euo pipefail
+
+# ── Platform detection ────────────────────────────────────────────────────────
+OS_NAME="$(uname -s)"
+ARCH="$(uname -m)"
+case "$OS_NAME" in
+    Linux)  PLATFORM="linux" ;;
+    Darwin) PLATFORM="macos" ;;
+    *)      echo "Unsupported operating system: $OS_NAME" >&2; exit 1 ;;
+esac
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -46,21 +67,27 @@ step()  { echo -e "\n${CYN}━━━━━━━━━━━━━━━━━�
 
 usage() {
     cat << EOF
-Usage: $0 [--upgrade] [--no-ufw]
+Usage: $0 [--upgrade] [--stop] [--no-ufw]
 
-  (no flags)  Install or repair the server, build the image and start it.
-  --upgrade   Download the latest Hytale build, rebuild and restart.
-  --no-ufw    Leave firewall rules untouched.
+  (no flags)  Install or repair the server and start it.
+  --upgrade   Linux: download the latest Hytale build, rebuild and restart.
+              macOS: print Hytale's built-in /update steps.
+  --stop      Stop the running server.
+  --no-ufw    Linux only: leave firewall rules untouched.
   -h, --help  Show this help.
+
+Detected platform: $PLATFORM ($ARCH)
 EOF
 }
 
 # ── Flags ─────────────────────────────────────────────────────────────────────
 UPGRADE=false
+STOP=false
 SKIP_UFW=false
 for arg in "$@"; do
     case "$arg" in
         --upgrade) UPGRADE=true ;;
+        --stop)    STOP=true ;;
         --no-ufw)  SKIP_UFW=true ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; die "Unknown argument: $arg" ;;
@@ -79,10 +106,15 @@ HYTALE_PORT="5520"
 DATA_DIR="$PROJECT_DIR/data"
 STAGING_DIR="$PROJECT_DIR/.hytale-staging"
 CONTAINER_NAME="hytale-server"
+SCREEN_NAME="hytale"
 
-# JVM heap — adjust to your machine. Hytale requires at least 4 GB.
+# Linux/Docker JVM heap — adjust to your machine. Hytale requires at least 4 GB.
 JVM_XMS="3g"
 JVM_XMX="6g"
+
+# macOS native JVM heap. The script lowers this automatically on 8 GB Macs.
+MAC_JVM_XMS="1g"
+MAC_JVM_XMX="4g"
 
 if [[ $EUID -eq 0 ]]; then
     SUDO=()
@@ -94,7 +126,11 @@ run_sudo() { "${SUDO[@]}" "$@"; }
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BLU}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLU}  Hytale Server Bootstrap · CachyOS / Arch edition${NC}"
+if [[ "$PLATFORM" == "macos" ]]; then
+    echo -e "${BLU}  Hytale Server Bootstrap · macOS native edition${NC}"
+else
+    echo -e "${BLU}  Hytale Server Bootstrap · Linux / Docker edition${NC}"
+fi
 echo -e "${BLU}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -117,6 +153,432 @@ backup_and_write() {
         printf '%s\n' "$content" | run_sudo tee "$path" >/dev/null
     fi
 }
+
+# ── macOS helpers ─────────────────────────────────────────────────────────────
+# The Mac build of Hytale is a normal Java application: HytaleServer.jar ships
+# native/osx-arm64 libraries, so no Docker, Rosetta or QEMU is needed.
+macos_total_ram_gb() {
+    local bytes
+    bytes="$(sysctl -n hw.memsize 2>/dev/null || echo 0)"
+    if [[ "$bytes" =~ ^[0-9]+$ ]] && (( bytes > 0 )); then
+        echo $(( bytes / 1024 / 1024 / 1024 ))
+    else
+        echo 0
+    fi
+}
+
+macos_jvm_content() {
+    local ram_gb="${1:-0}"
+    cat << EOF
+# Hytale server JVM options (macOS).
+# Loaded automatically by start.sh — one argument per line.
+# Lines starting with # are comments.
+#
+# Tuned for a ${ram_gb} GB Mac. Leave memory for macOS and the GPU.
+# Raise -Xmx only if you have more RAM and a larger view distance.
+-Xms${MAC_JVM_XMS}
+-Xmx${MAC_JVM_XMX}
+
+# G1 is a good fit for a small heap on Apple Silicon.
+-XX:+UseG1GC
+EOF
+}
+
+macos_find_java() {
+    local candidate version
+    if [[ -n "${JAVA_HOME:-}" && -x "$JAVA_HOME/bin/java" ]]; then
+        candidate="$JAVA_HOME/bin/java"
+        version="$("$candidate" -version 2>&1 | head -n1 || true)"
+        if [[ "$version" == *'version "25'* ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    fi
+    for candidate in \
+        "$PROJECT_DIR/.jdk/Contents/Home/bin/java" \
+        "/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin/java" \
+        "/opt/homebrew/opt/openjdk@25/bin/java" \
+        "/usr/local/opt/openjdk@25/bin/java"; do
+        [[ -x "$candidate" ]] || continue
+        version="$("$candidate" -version 2>&1 | head -n1 || true)"
+        if [[ "$version" == *'version "25'* ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    if command -v java >/dev/null 2>&1; then
+        candidate="$(command -v java)"
+        version="$("$candidate" -version 2>&1 | head -n1 || true)"
+        if [[ "$version" == *'version "25'* ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+macos_download_java() {
+    local arch adt_arch tmp java_bin downloaded=false candidate
+    arch="$(uname -m)"
+    case "$arch" in
+        arm64)  adt_arch="aarch64" ;;
+        x86_64) adt_arch="x64" ;;
+        *) die "Unsupported macOS architecture: $arch" ;;
+    esac
+
+    tmp=""
+    for candidate in "$PROJECT_DIR"/OpenJDK25U-jdk_*_mac_hotspot_*.tar.gz "$PROJECT_DIR"/temurin25-mac-*.tar.gz; do
+        if [[ -f "$candidate" ]]; then
+            tmp="$candidate"
+            break
+        fi
+    done
+
+    if [[ -n "$tmp" ]]; then
+        info "Using local Java archive: $(basename "$tmp")" >&2
+    else
+        info "Java 25 not found. Downloading Temurin 25 for macOS ${arch}..." >&2
+        tmp="$PROJECT_DIR/.jdk-download.tar.gz"
+        downloaded=true
+        if ! curl -fL --progress-bar -o "$tmp" \
+            "https://api.adoptium.net/v3/binary/latest/25/ga/mac/${adt_arch}/jdk/hotspot/normal/eclipse"; then
+            rm -f "$tmp"
+            die "Could not download Java 25. Install Temurin 25 manually or copy a .jdk folder into $PROJECT_DIR."
+        fi
+    fi
+
+    rm -rf "$PROJECT_DIR/.jdk"
+    mkdir -p "$PROJECT_DIR/.jdk"
+    if ! tar -xzf "$tmp" -C "$PROJECT_DIR/.jdk" --strip-components=1; then
+        if [[ "$downloaded" == true ]]; then rm -f "$tmp"; fi
+        die "Could not extract Java 25."
+    fi
+    if [[ "$downloaded" == true ]]; then rm -f "$tmp"; fi
+    xattr -dr com.apple.quarantine "$PROJECT_DIR/.jdk" 2>/dev/null || true
+
+    java_bin="$PROJECT_DIR/.jdk/Contents/Home/bin/java"
+    [[ -x "$java_bin" ]] || die "Java extraction did not produce $java_bin."
+    echo "$java_bin"
+}
+
+macos_link_dir() {
+    local link="$1" target="$2" current
+    if [[ -L "$link" ]]; then
+        current="$(readlink "$link")"
+        if [[ "$current" == "$target" ]]; then
+            ok "$link -> $target"
+            return 0
+        fi
+        warn "Replacing $link (was -> $current)"
+        rm -f "$link"
+    elif [[ -e "$link" ]]; then
+        if [[ -d "$link" && -z "$(ls -A "$link" 2>/dev/null)" ]]; then
+            rmdir "$link"
+        else
+            warn "$link exists and is not a symlink; leaving it untouched."
+            warn "Move its contents into $target if you want data/ to be authoritative."
+            return 1
+        fi
+    fi
+    ln -s "$target" "$link"
+    ok "$link -> $target"
+}
+
+macos_link_auth_file() {
+    local name="$1" link="Server/$1" target="../data/auth/$1" data_file="$DATA_DIR/auth/$1"
+    if [[ -L "$link" ]]; then
+        rm -f "$link"
+    elif [[ -e "$link" ]]; then
+        if [[ ! -s "$data_file" ]]; then
+            mv "$link" "$data_file"
+            chmod 600 "$data_file"
+            ok "Moved Server/$name into data/auth/."
+        else
+            local backup="$link.bak.$(date +%Y%m%d-%H%M%S)"
+            mv "$link" "$backup"
+            warn "Server/$name and data/auth/$name both exist; kept the latter."
+            warn "Previous file saved as $(basename "$backup")."
+        fi
+    fi
+    ln -s "$target" "$link"
+    ok "$link -> $target"
+}
+
+macos_prepare_jvm_options() {
+    local ram_gb xmx
+    ram_gb="$(macos_total_ram_gb)"
+    if [[ ! -f "jvm.options" ]]; then
+        backup_and_write "jvm.options" "$(macos_jvm_content "$ram_gb")"
+        ok "jvm.options written for ${ram_gb} GB RAM (${MAC_JVM_XMS}-${MAC_JVM_XMX}, G1)."
+        return 0
+    fi
+
+    xmx="$(grep -E '^-Xmx' "jvm.options" | tail -n1 | sed 's/^-Xmx//' || true)"
+    if grep -q "Hytale server JVM options" "jvm.options" && (( ram_gb > 0 && ram_gb <= 10 )); then
+        if grep -qE '^-Xmx([6-9]|[1-9][0-9]+)g' "jvm.options"; then
+            backup_and_write "jvm.options" "$(macos_jvm_content "$ram_gb")"
+            warn "Adjusted jvm.options for ${ram_gb} GB RAM (was -Xmx${xmx}; set to ${MAC_JVM_XMX}, G1)."
+        else
+            ok "jvm.options already suitable for ${ram_gb} GB RAM (-Xmx${xmx:-unknown})."
+        fi
+    else
+        warn "jvm.options exists; preserving custom settings (-Xmx${xmx:-unknown})."
+        if (( ram_gb > 0 && ram_gb <= 10 )) && [[ "$xmx" =~ ^([6-9]|[1-9][0-9]+)g$ ]]; then
+            warn "This Mac has ${ram_gb} GB RAM; -Xmx${xmx} may be too large."
+        fi
+    fi
+}
+
+macos_ensure_gitignore() {
+    local patterns=(".jdk/" ".jdk-download.tar.gz" "screenlog.*")
+    local pattern changed=false
+    for pattern in "${patterns[@]}"; do
+        if ! grep -qxF "$pattern" ".gitignore" 2>/dev/null; then
+            if [[ "$changed" == false ]]; then
+                printf '\n# macOS native runtime\n' >> ".gitignore"
+                changed=true
+            fi
+            printf '%s\n' "$pattern" >> ".gitignore"
+        fi
+    done
+    if [[ "$changed" == true ]]; then
+        ok "Added macOS runtime files to .gitignore."
+    fi
+    return 0
+}
+
+macos_server_running() {
+    pgrep -f '[H]ytaleServer.jar' >/dev/null 2>&1
+}
+
+macos_stop() {
+    if ! macos_server_running; then
+        ok "Hytale server is not running."
+        screen -wipe >/dev/null 2>&1 || true
+        return 0
+    fi
+    info "Stopping Hytale server..."
+    if screen -ls 2>/dev/null | grep -q "[.]${SCREEN_NAME}[[:space:]]"; then
+        screen -S "$SCREEN_NAME" -p 0 -X stuff $'/stop\n' 2>/dev/null || true
+        local i
+        for i in $(seq 1 20); do
+            if ! macos_server_running; then break; fi
+            sleep 1
+        done
+    fi
+    if macos_server_running; then
+        warn "Server did not stop cleanly; terminating the Java process."
+        pkill -TERM -f '[H]ytaleServer.jar' 2>/dev/null || true
+        sleep 3
+        pkill -KILL -f '[H]ytaleServer.jar' 2>/dev/null || true
+    fi
+    screen -S "$SCREEN_NAME" -X quit 2>/dev/null || true
+    screen -wipe >/dev/null 2>&1 || true
+    ok "Server stopped."
+}
+
+macos_start() {
+    local java_bin="$1" log_file="$DATA_DIR/server.log" i
+    mkdir -p "$DATA_DIR"
+    screen -wipe >/dev/null 2>&1 || true
+    if macos_server_running; then
+        ok "Hytale server is already running."
+        return 0
+    fi
+    : > "$log_file"
+    info "Starting Hytale server in screen session '$SCREEN_NAME'..."
+    screen -dmS "$SCREEN_NAME" bash -c "cd '$PROJECT_DIR' && export JAVA_HOME='$JAVA_HOME' && export PATH='$JAVA_HOME/bin':\$PATH && exec script -q '$log_file' ./start.sh"
+    for i in $(seq 1 15); do
+        if macos_server_running; then break; fi
+        sleep 1
+    done
+    if ! macos_server_running; then
+        warn "Server process exited immediately. Last log lines:"
+        tail -n 80 "$log_file" 2>/dev/null || true
+        die "Server failed to start."
+    fi
+    ok "Server process started (PID(s): $(pgrep -f '[H]ytaleServer.jar' | tr '\n' ' ' || true))."
+}
+
+macos_main() {
+    step "macOS native mode"
+    ok "macOS $(sw_vers -productVersion) on $(uname -m)"
+
+    if [[ "$STOP" == true ]]; then
+        macos_stop
+        exit 0
+    fi
+
+    if [[ "$UPGRADE" == true ]]; then
+        step "Upgrade on macOS"
+        warn "The official Hytale downloader has no macOS build."
+        if macos_server_running; then
+            info "Sending /update check to the running server..."
+            screen -S "$SCREEN_NAME" -p 0 -X stuff $'/update check\n' 2>/dev/null || true
+            echo "  Watch: tail -f data/server.log"
+            echo "  Then attach and run: screen -r $SCREEN_NAME"
+        else
+            echo "  Start the server first: ./$(basename "$0")"
+            echo "  Then attach and run: screen -r $SCREEN_NAME"
+        fi
+        echo ""
+        echo "  /update download"
+        echo "  /update apply --confirm"
+        echo ""
+        echo "  The start.sh wrapper applies the staged update and restarts."
+        return 0
+    fi
+
+    if [[ ! -f "Server/HytaleServer.jar" ]]; then
+        die "Server/HytaleServer.jar not found. Copy Server/, Assets.zip and start.sh from the Linux installation (the official downloader is Linux/Windows-only), or from the Hytale launcher."
+    fi
+    if [[ ! -f "Assets.zip" ]]; then
+        die "Assets.zip not found. Copy it from the Linux installation or the Hytale launcher."
+    fi
+    if [[ ! -f "start.sh" ]]; then
+        die "start.sh not found. Copy it from the Linux installation, or run /update setup on a server console."
+    fi
+    chmod +x "start.sh"
+
+    local java_bin java_home version
+    if java_bin="$(macos_find_java)"; then
+        ok "Java 25 found: $java_bin"
+    else
+        java_bin="$(macos_download_java)"
+        ok "Java 25 installed under .jdk/."
+    fi
+    java_home="$(cd "$(dirname "$java_bin")/.." && pwd)"
+    export JAVA_HOME="$java_home"
+    export PATH="$JAVA_HOME/bin:$PATH"
+    version="$("$java_bin" -version 2>&1 | head -n1)"
+    ok "$version"
+
+    step "Preparing persistent data"
+    mkdir -p "$DATA_DIR/universe" "$DATA_DIR/backups" "$DATA_DIR/auth"
+    for auth_file in auth.key auth.enc; do
+        if [[ ! -e "$DATA_DIR/auth/$auth_file" ]]; then
+            : > "$DATA_DIR/auth/$auth_file"
+        fi
+    done
+    chmod 700 "$DATA_DIR/auth"
+    chmod 600 "$DATA_DIR/auth/auth.key" "$DATA_DIR/auth/auth.enc"
+
+    macos_link_dir "Server/universe" "../data/universe" \
+        || die "Server/universe is a real directory. Merge it into data/universe or move it aside, then re-run."
+    macos_link_dir "Server/backups" "../data/backups" \
+        || warn "Using existing Server/backups (data/backups is not linked)."
+    macos_link_auth_file "auth.key"
+    macos_link_auth_file "auth.enc"
+
+    echo "  World:      data/universe"
+    echo "  Backups:    data/backups"
+    echo "  Auth files: data/auth  ← never commit this folder"
+
+    macos_prepare_jvm_options
+    macos_ensure_gitignore
+
+    step "Starting Hytale Server"
+    macos_start "$java_bin"
+
+    info "Waiting for the server to finish booting..."
+    local booted=false auth_ready=false i
+    for i in $(seq 1 90); do
+        if grep -q "Hytale Server Booted!" "$DATA_DIR/server.log" 2>/dev/null; then
+            booted=true
+            break
+        fi
+        if ! macos_server_running; then
+            warn "Server stopped unexpectedly. Last log lines:"
+            tail -n 80 "$DATA_DIR/server.log" 2>/dev/null || true
+            die "Server failed to start."
+        fi
+        sleep 2
+    done
+    if [[ "$booted" == true ]]; then
+        ok "Server booted."
+    else
+        warn "Boot message not seen yet — check: tail -f data/server.log"
+    fi
+
+    sleep 3
+    if grep -q "Authentication successful" "$DATA_DIR/server.log" 2>/dev/null; then
+        auth_ready=true
+    fi
+
+    local lan_ip
+    lan_ip="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+    if [[ -z "$lan_ip" ]]; then
+        lan_ip="$(ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')"
+    fi
+    if [[ -z "$lan_ip" ]]; then
+        lan_ip="<your-lan-ip>"
+    fi
+
+    step "Server is running (macOS native)"
+    if [[ "$auth_ready" == false ]]; then
+        echo -e "  ${YLW}ONE-TIME SERVER AUTHORIZATION${NC}"
+        echo ""
+        echo "  The server needs its own token before players can connect."
+        echo "  Attach to its console:"
+        echo ""
+        echo -e "    ${GRN}screen -r ${SCREEN_NAME}${NC}"
+        echo ""
+        echo "  Then type:"
+        echo ""
+        echo -e "    ${GRN}/auth login device${NC}"
+        echo ""
+        echo "  Open the URL it prints, approve the code, then detach WITHOUT"
+        echo "  stopping the server:"
+        echo ""
+        echo -e "    ${GRN}Ctrl+A${NC} then ${GRN}D${NC}"
+        echo ""
+        echo "  The token is saved in data/auth/ and survives restarts and copies."
+        echo ""
+    else
+        echo -e "  ${GRN}Server authorization is already configured.${NC}"
+        echo ""
+    fi
+
+    echo -e "  ${YLW}CONNECT${NC}"
+    echo -e "    LAN:          ${GRN}${lan_ip}:${HYTALE_PORT}${NC}"
+    echo -e "    This machine: ${GRN}127.0.0.1:${HYTALE_PORT}${NC}"
+    echo ""
+
+    echo -e "  ${YLW}COMMON COMMANDS${NC}"
+    echo "    Live logs:       tail -f data/server.log"
+    echo "    Attach console:  screen -r ${SCREEN_NAME}"
+    echo "    Detach:          Ctrl+A then D"
+    echo "    Stop:            ./$(basename "$0") --stop"
+    echo "    Start:           ./$(basename "$0")"
+    echo "    Upgrade:         /update check, /update download, /update apply --confirm"
+    echo ""
+
+    echo -e "  ${YLW}macOS NOTES${NC}"
+    echo "    HytaleServer.jar contains native/osx-arm64 libraries. The server is"
+    echo "    running natively — no Docker, Rosetta or QEMU is involved."
+    echo "    The official Hytale downloader has no macOS build; keep the server"
+    echo "    files updated via the /update commands or copy them from Linux."
+    echo "    Allow incoming UDP ${HYTALE_PORT} if the macOS firewall prompts."
+    echo "    Keep the Mac awake (System Settings → Energy) so the server stays up."
+    echo ""
+
+    echo -e "  ${YLW}SECURITY${NC}"
+    echo "    Never commit .hytale-downloader-credentials.json or data/auth/."
+    echo "    Both are already listed in .gitignore."
+    echo ""
+}
+
+# ── Linux / Docker mode ───────────────────────────────────────────────────────
+if [[ "$PLATFORM" == "linux" ]]; then
+
+if [[ "$STOP" == true ]]; then
+    step "Stopping Hytale Server"
+    if command -v docker &>/dev/null; then
+        docker compose down 2>/dev/null || docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    fi
+    ok "Server stopped."
+    exit 0
+fi
 
 # ── 0. Upgrade mode — stop the server; keep world and auth ───────────────────
 if [[ "$UPGRADE" == true ]]; then
@@ -623,6 +1085,9 @@ GITIGNORE_PATTERNS=(
     "hytale-downloader-linux-amd64"
     "*.zip"
     ".hytale-staging/"
+    ".jdk/"
+    ".jdk-download.tar.gz"
+    "screenlog.*"
     "*.bak.*"
 )
 if [[ ! -f ".gitignore" ]]; then
@@ -753,3 +1218,7 @@ echo -e "  ${YLW}SECURITY${NC}"
 echo "    Never commit .hytale-downloader-credentials.json or data/auth/."
 echo "    Both are already listed in .gitignore."
 echo ""
+
+else
+    macos_main
+fi

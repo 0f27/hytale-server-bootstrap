@@ -13,4 +13,7 @@ start.*
 hytale-downloader-linux-amd64
 *.zip
 .hytale-staging/
+.jdk/
+.jdk-download.tar.gz
+screenlog.*
 *.bak.*
