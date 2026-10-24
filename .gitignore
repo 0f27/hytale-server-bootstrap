@@ -11,9 +11,13 @@ Assets.zip
 Server/
 start.*
 hytale-downloader-linux-amd64
+hytale-downloader-windows-amd64.exe
 *.zip
 .hytale-staging/
 .jdk/
 .jdk-download.tar.gz
+.jdk-download.zip
+.jdk-extract/
+updater/
 screenlog.*
 *.bak.*

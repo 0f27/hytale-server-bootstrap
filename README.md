@@ -1,6 +1,6 @@
 # Hytale Server Bootstrap
 
-One-script self-hosted Hytale dedicated server setup for **CachyOS / Arch Linux (Docker)** and **macOS (native Java 25)**.
+One-script self-hosted Hytale dedicated server setup for **CachyOS / Arch Linux (Docker)**, **macOS (native Java 25)**, and **Windows 10/11 (native Java 25)**.
 
 Run a single command and get a fully configured Hytale server with persistent world data, automatic restarts, portable authentication, and a working firewall setup.
 
@@ -23,15 +23,26 @@ Run a single command and get a fully configured Hytale server with persistent wo
 - `Server/`, `Assets.zip`, and `start.sh` copied from the Linux installation, the
   Hytale launcher, or a JAR bootstrap install
 
-> **macOS runs natively.** `HytaleServer.jar` contains `native/osx-arm64` libraries,
-> so the server does **not** need Docker, Rosetta, or QEMU on an M1/M2/M3/M4 Mac.
+**Windows:**
+
+- Windows 10 or 11 on **x64**
+- PowerShell 5.1 or newer (included with Windows)
+- Java 25 (the script downloads Temurin 25 into `.jdk\` if it is missing)
+- A Hytale account that **owns the game** (Standard Edition or higher)
+- Internet connection (~1.6 GB download for server files)
+- An NTFS volume for the project folder (directory junctions and file hardlinks;
+  no administrator rights or Developer Mode are required for the normal path)
+
+> **macOS and Windows run natively.** `HytaleServer.jar` contains
+> `native/osx-arm64` and `native/win-x64` libraries, so the server does **not**
+> need Docker, Rosetta, QEMU, or WSL on those systems.
 > The Linux Docker path is unchanged. If you deliberately run Docker on Apple
 > Silicon, `docker-compose.yml` sets `platform: linux/amd64` so Docker uses
 > Rosetta instead of trying to run an arm64 container.
 
 ---
 
-## Quick Start
+## Linux Quick Start
 
 ```bash
 mkdir hytale-server && cd hytale-server
@@ -109,6 +120,67 @@ copy a fresh `Server/`, `Assets.zip`, and `start.sh` from the Linux machine.
 
 ---
 
+## Windows Quick Start
+
+Windows uses native Java 25 and Hytale's `start.bat`; Docker and WSL are not required.
+
+```powershell
+git clone https://github.com/0f27/hytale-server-bootstrap.git
+cd hytale-server-bootstrap
+powershell -ExecutionPolicy Bypass -File .\hytale-server-bootstrap.ps1
+```
+
+If Git is not installed, download the repository ZIP from GitHub, extract it, and
+open PowerShell in that folder:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\hytale-server-bootstrap.ps1
+```
+
+The script detects Windows and:
+
+1. Downloads the official Hytale Downloader for Windows when the server files are missing
+2. Authenticates with your Hytale account and extracts the latest server archive
+3. Finds Java 25 or downloads Temurin 25 into `.jdk\`
+4. Links `Server\universe`, `Server\backups`, and the auth files to the portable `data\` folder
+5. Tunes `jvm.options` for the PC's RAM
+6. Starts `start.bat` in a new console window
+
+The new console window is the server console. Type `/auth login device` there and
+keep it open. Stop the server with `/stop` before closing the window.
+
+Useful commands:
+
+```powershell
+# Start or repair (safe to re-run)
+.\hytale-server-bootstrap.ps1
+
+# Prepare/download only, do not start
+.\hytale-server-bootstrap.ps1 -NoStart
+
+# Stop (in the server console)
+/stop
+
+# Update (in the server console)
+/update check
+/update download
+/update apply --confirm
+```
+
+If `Server\`, `Assets.zip`, and `start.bat` already exist (for example copied from
+another machine), the script skips the download and only prepares Java, links,
+`jvm.options`, and the console launch.
+
+Allow incoming UDP 5520 when Windows Defender Firewall prompts, or run this once
+in an elevated PowerShell:
+
+```powershell
+New-NetFirewallRule -DisplayName "Hytale Server" -Direction Inbound -Protocol UDP -LocalPort 5520 -Action Allow
+```
+
+---
+
 ## First Boot — Server Authentication
 
 After the server starts you need to authenticate it **once** with your Hytale account.
@@ -128,6 +200,9 @@ docker attach hytale-server
 screen -r hytale
 ```
 
+**Windows:** the server console is already open in the window created by the
+bootstrap. Use that window.
+
 Inside the server console type:
 
 ```
@@ -142,8 +217,10 @@ with `Authentication successful!` and saves the token. Then detach **without sto
 
 - Linux/Docker: `Ctrl+P` then `Ctrl+Q`
 - macOS: `Ctrl+A` then `D`
+- Windows: no detach is needed. Keep the server console window open.
 
-No restart is needed. The server keeps running in the background.
+No restart is needed. The server keeps running in the background (Linux/macOS)
+or in its console window (Windows).
 
 The credentials live in `data/auth/`:
 
@@ -171,7 +248,8 @@ In Hytale: **Servers → Direct Connect** and enter the address above.
 
 ## Copying the Server Folder
 
-The folder is self-contained apart from the Docker image:
+On macOS and Windows the folder is self-contained. On Linux it is self-contained
+apart from the Docker image:
 
 ```bash
 # Stop cleanly before copying
@@ -205,9 +283,21 @@ The script creates the `Server/universe`, `Server/backups`, and auth symlinks in
 `data/`, downloads Java 25 if needed, and starts the server natively. Your world and
 authorization are already in `data/`; no re-download and no re-authentication are needed.
 
-If you only want to migrate the world, copy `data/` to a fresh folder and run
-`./hytale-server-bootstrap.sh` there. On Linux the script re-downloads the server
-binaries; on macOS it expects `Server/`, `Assets.zip`, and `start.sh` to be present.
+**Windows:**
+
+```powershell
+cd C:\path\to\hytale-server
+.\hytale-server-bootstrap.ps1
+```
+
+The script recreates the `Server\universe` and `Server\backups` directory junctions
+and the auth hardlinks into `data\`. Your world and authorization are already in
+`data\`; no re-download and no re-authentication are needed.
+
+If you only want to migrate the world, copy `data/` to a fresh folder and run the
+platform bootstrap there. On Linux the script re-downloads the server binaries; on
+macOS it expects `Server/`, `Assets.zip`, and `start.sh` to be present; on Windows
+it downloads them automatically when they are missing.
 
 > Never commit `.hytale-downloader-credentials.json` or anything under `data/`.
 > Both are excluded by `.gitignore`.
@@ -220,29 +310,31 @@ After first run the folder looks like this:
 
 ```
 hytale-server/
-├── hytale-server-bootstrap.sh      # this script
+├── hytale-server-bootstrap.sh      # Linux/macOS bootstrap
+├── hytale-server-bootstrap.ps1     # Windows bootstrap
 ├── Dockerfile                      # generated
 ├── docker-compose.yml              # generated
 ├── docker-entrypoint.sh            # generated — ownership repair + privilege drop
 ├── .dockerignore                   # generated
-├── start.sh                        # from Hytale archive
+├── start.sh                        # from Hytale archive (Linux/macOS)
+├── start.bat                       # from Hytale archive (Windows)
 ├── Assets.zip                      # from Hytale archive (~3.7 GB)
 ├── jvm.options                     # generated — edit heap/GC here
-├── .jdk/                           # macOS only — Temurin Java 25 (auto-downloaded)
+├── .jdk/                           # macOS/Windows — Temurin Java 25 (auto-downloaded)
 ├── Server/                         # from Hytale archive
 │   ├── HytaleServer.jar
 │   ├── HytaleServer.aot.config
 │   ├── Licenses/
-│   ├── universe -> ../data/universe   # macOS symlink
-│   ├── backups  -> ../data/backups    # macOS symlink
-│   ├── auth.key -> ../data/auth/auth.key  # macOS symlink
-│   └── auth.enc -> ../data/auth/auth.enc  # macOS symlink
+│   ├── universe -> ../data/universe   # macOS symlink / Windows junction
+│   ├── backups  -> ../data/backups    # macOS symlink / Windows junction
+│   ├── auth.key -> ../data/auth/auth.key  # macOS symlink / Windows hardlink
+│   └── auth.enc -> ../data/auth/auth.enc  # macOS symlink / Windows hardlink
 └── data/                           # persistent state
     ├── universe/                   # ← world data (the only thing you need to back up)
     │   ├── players/                #   player profiles
     │   └── worlds/default/         #   world chunks, resources, config
-    ├── backups/                    # ← periodic snapshots from start.sh
-    ├── server.log                  # macOS native console log
+    ├── backups/                    # ← periodic snapshots from start.sh/start.bat
+    ├── server.log                  # macOS native console log (Windows uses its console)
     └── auth/                       # ← server authorization (never commit)
         ├── auth.key                #   encryption key
         └── auth.enc                #   encrypted server token
@@ -250,9 +342,10 @@ hytale-server/
 
 On Linux, `data/universe`, `data/backups`, and `data/auth` are bind-mounted into the
 container. On macOS they are exposed to the native server through symlinks inside
-`Server/`. `data/` is owned by the user who ran the bootstrap; the container starts as
-root only long enough to repair mount ownership, then drops to that same user before
-launching the server.
+`Server/`. On Windows they are exposed through directory junctions and auth-file
+hardlinks (with symlink/copy fallbacks). `data/` is owned by the user who ran the
+bootstrap; the Linux container starts as root only long enough to repair mount
+ownership, then drops to that same user before launching the server.
 
 ---
 
@@ -267,8 +360,8 @@ Linux defaults assume ~16 GB RAM:
 -Xmx6g
 ```
 
-macOS defaults are tuned automatically for the machine's RAM. On an 8 GB Mac the
-script writes:
+macOS and Windows defaults are tuned automatically for the machine's RAM. On an
+8 GB Mac/PC the script writes:
 
 ```
 -Xms1g
@@ -276,8 +369,9 @@ script writes:
 -XX:+UseG1GC
 ```
 
-Hytale recommends at least **4 GB of RAM** for the server. Leave headroom for macOS
-and the GPU on smaller machines.
+Larger machines get 2–6 GB or 3–6 GB heaps; the Windows script uses 4–8 GB only
+above 24 GB of RAM. Hytale recommends at least **4 GB of RAM** for the server. Leave
+headroom for the OS and the GPU on smaller machines.
 
 Apply changes with:
 
@@ -290,13 +384,23 @@ docker compose restart
 ./hytale-server-bootstrap.sh
 ```
 
+```powershell
+# Windows: in the server console
+/stop
+# close the console, then:
+.\hytale-server-bootstrap.ps1
+```
+
 No rebuild is needed.
 
 ---
 
 ## Upgrading
 
-When a new version of Hytale is released, run:
+When a new version of Hytale is released, update the server from its own console
+on every platform. The sections below also cover the Linux re-download path.
+
+### Linux
 
 ```bash
 ./hytale-server-bootstrap.sh --upgrade
@@ -331,6 +435,20 @@ screen -r hytale
 copy fresh `Server/`, `Assets.zip`, and `start.sh` files from the Linux machine. Keep
 `data/` unchanged.
 
+### Windows
+
+Use Hytale's built-in updater in the server console:
+
+```powershell
+/update check
+/update download
+/update apply --confirm
+```
+
+`start.bat` applies the staged update and restarts the server automatically. You can
+also copy fresh `Server\`, `Assets.zip`, and `start.bat` files from another
+installation, then re-run `.\hytale-server-bootstrap.ps1` to recreate the links.
+
 Your world data and server auth in `data/` are never touched. `auth.key` and `auth.enc`
 travel with the folder, so no server re-authentication is needed after an upgrade.
 
@@ -362,6 +480,17 @@ file becomes a directory" trap and makes the pair easy to copy.
 Server/auth.key  ->  ../data/auth/auth.key
 Server/auth.enc  ->  ../data/auth/auth.enc
 ```
+
+**Windows:** the script creates hardlinks:
+
+```
+Server\auth.key  ->  data\auth\auth.key
+Server\auth.enc  ->  data\auth\auth.enc
+```
+
+Hardlinks share the same file content, so the server writes the token into
+`data\auth\` without a copy. If the filesystem does not support hardlinks, the
+script tries a symbolic link, then falls back to a copy with a warning.
 
 Once you authenticate with `/auth login device`, the server writes the token directly
 into `data/auth/auth.enc`. It persists across all restarts, rebuilds, and folder copies.
@@ -427,6 +556,25 @@ screen -r hytale
 #       /update apply --confirm
 ```
 
+Windows (PowerShell for the bootstrap; the other commands go in the server console):
+
+```powershell
+# Start or repair
+.\hytale-server-bootstrap.ps1
+
+# Prepare/download only
+.\hytale-server-bootstrap.ps1 -NoStart
+
+# Stop and update (server console)
+/stop
+/update check
+/update download
+/update apply --confirm
+
+# Re-authenticate (server console)
+/auth login device
+```
+
 ---
 
 ## Troubleshooting
@@ -490,18 +638,70 @@ Disable sleep in System Settings → Energy, or keep the server alive with:
 caffeinate -dimsu
 ```
 
+**Windows: PowerShell cannot run the script**
+Use a one-time process-scope bypass (it does not change the machine policy):
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\hytale-server-bootstrap.ps1
+```
+
+**Windows: Java 25 download fails**
+The script downloads Temurin 25 for Windows x64 from Adoptium into `.jdk\`. If the
+PC cannot reach GitHub, download `OpenJDK25U-jdk_x64_windows_hotspot_*.zip` on
+another machine, extract it, and either place the JDK contents so that
+`.jdk\bin\java.exe` exists or install Temurin 25 and set `JAVA_HOME` before
+re-running the script.
+
+**Windows: `Server\universe` is a real directory**
+The script refuses to overwrite an existing world directory. Merge it into the
+portable data directory, remove the real directory, then re-run:
+```powershell
+robocopy Server\universe data\universe /E /MOVE
+Remove-Item Server\universe -Force
+.\hytale-server-bootstrap.ps1
+```
+
+**Windows: hardlink or symbolic link creation fails**
+Use an NTFS folder (not FAT/exFAT, and avoid a cloud-synced folder that blocks
+reparse points). The script falls back to a copy for auth files; hardlinks and
+junctions normally work without administrator rights on NTFS. Enabling Windows
+Developer Mode allows the symbolic-link fallback for auth files.
+
+**Windows: players cannot connect**
+Allow incoming UDP `5520` in Windows Defender Firewall. In an elevated PowerShell:
+```powershell
+New-NetFirewallRule -DisplayName "Hytale Server" -Direction Inbound -Protocol UDP -LocalPort 5520 -Action Allow
+```
+Also check that the network profile is Private and the router forwards UDP 5520
+for internet play.
+
+**Windows: the server console closed / server stopped**
+The server runs in the `start.bat` console window. Keep it open; closing it stops
+the server. Type `/stop` first so the world is saved. Start it again with
+`.\hytale-server-bootstrap.ps1`.
+
+**Windows: UDP 5520 is already in use**
+Find the process holding the port, stop it, then restart the server:
+```powershell
+Get-NetUDPEndpoint -LocalPort 5520 | Select-Object LocalAddress,LocalPort,OwningProcess
+```
+
 **Downloader says `invalid_grant` / refresh token expired**
-The bootstrap script handles this automatically on Linux `--upgrade`. To force it manually:
+The bootstrap script handles this automatically on Linux `--upgrade` and on
+Windows. To force it manually on Linux:
 ```bash
 rm .hytale-downloader-credentials.json
 ./hytale-server-bootstrap.sh --upgrade
 ```
+On Windows, delete `.hytale-downloader-credentials.json` and re-run
+`.\hytale-server-bootstrap.ps1`.
 
 ---
 
 ## Notes
 
 - The server runs on **UDP port 5520** using the QUIC protocol
-- Linux uses Docker; macOS runs natively with Java 25 and the `native/osx-arm64` libraries in `HytaleServer.jar`
+- Linux uses Docker; macOS and Windows run natively with Java 25 and the `native/osx-arm64` / `native/win-x64` libraries in `HytaleServer.jar`
+- Windows runs `start.bat` in a separate console window; closing that window stops the server, so use `/stop` first
 - For internet play: forward UDP 5520 on your router, or use [Tailscale](https://tailscale.com) for zero-config peer-to-peer VPN — no port forwarding needed
-- Hytale's built-in backup runs every 30 minutes by default (`--backup-frequency 30` in `start.sh`) and writes to `data/backups/`
+- Hytale's built-in backup runs every 30 minutes by default (`--backup-frequency 30` in `start.sh`/`start.bat`) and writes to `data/backups/`

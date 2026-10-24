@@ -2,6 +2,9 @@
 # =============================================================================
 # Hytale Server Bootstrap — Linux (Docker) + macOS (native) edition
 #
+# Windows users: use hytale-server-bootstrap.ps1 (native Java 25 + start.bat).
+# This bash script intentionally rejects Windows; it detects Linux and macOS.
+#
 # The script detects the host OS and picks the right runtime:
 #
 # Linux (CachyOS / Arch, x86_64):
@@ -330,7 +333,7 @@ macos_prepare_jvm_options() {
 }
 
 macos_ensure_gitignore() {
-    local patterns=(".jdk/" ".jdk-download.tar.gz" "screenlog.*")
+    local patterns=(".jdk/" ".jdk-download.tar.gz" ".jdk-download.zip" "updater/" "screenlog.*")
     local pattern changed=false
     for pattern in "${patterns[@]}"; do
         if ! grep -qxF "$pattern" ".gitignore" 2>/dev/null; then
@@ -1060,10 +1063,14 @@ backup_and_write "docker-compose.yml" "$COMPOSE_CONTENT"
 # -- .dockerignore -------------------------------------------------------------
 DOCKERIGNORE_CONTENT="$(cat << 'EOF'
 hytale-server-bootstrap.sh
+hytale-server-bootstrap.ps1
 hytale-downloader-linux-amd64
+hytale-downloader-windows-amd64.exe
 hytale-downloader.zip
 .hytale-downloader-credentials.json*
 .hytale-staging/
+.jdk-download.zip
+.jdk-extract/
 data/
 .git
 .gitignore
@@ -1090,10 +1097,14 @@ GITIGNORE_PATTERNS=(
     "Server/"
     "start.*"
     "hytale-downloader-linux-amd64"
+    "hytale-downloader-windows-amd64.exe"
     "*.zip"
     ".hytale-staging/"
     ".jdk/"
     ".jdk-download.tar.gz"
+    ".jdk-download.zip"
+    ".jdk-extract/"
+    "updater/"
     "screenlog.*"
     "*.bak.*"
 )
