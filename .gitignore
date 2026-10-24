@@ -1,9 +1,16 @@
-.dockerignore
-.hytale-downloader-credentials.json
-Assets.zip
+# Hytale secrets and generated files — never commit
+.hytale-downloader-credentials.json*
+data/
+data/auth/
 Dockerfile
-Server
-data
-start.*
 docker-compose.yml
+docker-entrypoint.sh
+.dockerignore
+jvm.options
+Assets.zip
+Server/
+start.*
 hytale-downloader-linux-amd64
+*.zip
+.hytale-staging/
+*.bak.*
