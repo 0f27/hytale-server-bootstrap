@@ -1163,7 +1163,7 @@ if docker compose logs --no-color 2>&1 | grep -q "Authentication successful"; th
 fi
 
 # ── 11. Post-launch instructions ─────────────────────────────────────────────
-LAN_IP="$(ip -4 route get 1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1 || true)"
+LAN_IP="$(ip -4 route get 1 2>/dev/null | sed -n 's/.*src \([0-9][0-9.]*\).*/\1/p' | head -n1 || true)"
 [[ -n "$LAN_IP" ]] || LAN_IP="<your-lan-ip>"
 
 step "Server is running"
