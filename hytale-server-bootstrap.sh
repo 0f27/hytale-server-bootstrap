@@ -983,7 +983,7 @@ chmod +x "docker-entrypoint.sh"
 
 # -- Dockerfile ----------------------------------------------------------------
 DOCKERFILE_CONTENT="$(cat << 'EOF'
-# eclipse-temurin 25 — official Adoptium build, matches Hytale's Java requirement.
+# eclipse-temurin 25 — official Adoptium build, matches the Hytale Java requirement.
 FROM eclipse-temurin:25-jre-noble
 
 # Fallback user used if the data directory is not accessible (UID 1500).
