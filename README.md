@@ -91,6 +91,9 @@ tail -f data/server.log
 ./hytale-server-bootstrap.sh
 ```
 
+The script is idempotent. After a reboot, run it again to recreate the `screen`
+session and start the server with the same world and auth files.
+
 The official Hytale downloader is Linux/Windows-only, so macOS upgrades use the
 server's built-in update commands instead:
 
@@ -462,6 +465,11 @@ GitHub, download `OpenJDK25U-jdk_aarch64_mac_hotspot_*.tar.gz` on another machin
 put it in the server folder, then re-run the script. It also accepts a pre-installed
 JDK 25 under `/Library/Java/JavaVirtualMachines/temurin-25.jdk` or Homebrew's
 `openjdk@25`.
+
+**macOS: red `SEVERE [SERR] Reallocate ...` lines at startup**
+Hytale's native auth library emits these allocator diagnostics on Apple Silicon. They
+are not a startup failure; the server continues to authenticate and boot. Confirm that
+`Hytale Server Booted!` and `Authentication successful!` appear later in the log.
 
 **macOS: `Server/universe is a real directory`**
 The script refuses to overwrite an existing world directory. Merge it into the portable
