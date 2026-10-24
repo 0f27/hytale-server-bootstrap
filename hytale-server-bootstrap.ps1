@@ -684,7 +684,7 @@ if (-not $NoStart) {
     Start-HytaleServer $java
 } else {
     Write-Ok 'Preparation complete; server not started (-NoStart).'
-    Write-Host '  Start it with: .\start.bat' -ForegroundColor Gray
+    Write-Host '  Start it with: .\hytale-server-bootstrap.ps1' -ForegroundColor Gray
 }
 
 $lanIp = Get-LanIp
