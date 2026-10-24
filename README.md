@@ -565,8 +565,10 @@ Windows (PowerShell for the bootstrap; the other commands go in the server conso
 # Prepare/download only
 .\hytale-server-bootstrap.ps1 -NoStart
 
-# Stop and update (server console)
+# Stop (server console)
 /stop
+
+# Update while the server is running (server console)
 /update check
 /update download
 /update apply --confirm
