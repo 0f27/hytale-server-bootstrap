@@ -13,6 +13,12 @@ Run a single command and get a fully configured, containerised Hytale server wit
 - `sudo` access
 - Internet connection (~1.6 GB download for server files)
 
+> **macOS / Apple Silicon:** the bootstrap script itself targets Arch Linux, but a
+> fully populated server folder can be started on macOS with Docker. Hytale only
+> ships Linux native libraries for x86_64, so `docker-compose.yml` sets
+> `platform: linux/amd64`. Enable Rosetta in OrbStack or Docker Desktop, then run
+> `docker compose up -d --build` from the copied folder. Expect emulation overhead.
+
 ---
 
 ## Quick Start

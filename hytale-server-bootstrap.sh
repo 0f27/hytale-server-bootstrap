@@ -560,6 +560,9 @@ services:
   hytale:
     build: .
     container_name: ${CONTAINER_NAME}
+    # Hytale ships Linux native libraries for x86_64 only. On Apple Silicon this
+    # makes Docker use Rosetta/QEMU instead of failing on an arm64 container.
+    platform: linux/amd64
     restart: unless-stopped
     ports:
       - "${HYTALE_PORT}:${HYTALE_PORT}/udp"
