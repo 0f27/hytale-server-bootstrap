@@ -335,24 +335,41 @@ travel with the folder, so no server re-authentication is needed after an upgrad
 
 ## Auth Files
 
-The server token is stored as two files in a bind-mounted directory:
+The server token is stored as two files under `data/auth/`:
+
+- `auth.key` — encryption key
+- `auth.enc` — encrypted server token
+
+`auth.key` decrypts `auth.enc`. Both are required.
+
+**Linux / Docker:** `data/auth` is bind-mounted to `/server/auth`, and the container
+entrypoint links `/server/Server/auth.key` and `auth.enc` to it:
 
 ```
 data/auth/auth.key  →  /server/auth/auth.key  →  /server/Server/auth.key (symlink)
 data/auth/auth.enc  →  /server/auth/auth.enc  →  /server/Server/auth.enc (symlink)
 ```
 
-`auth.key` decrypts `auth.enc`. Both are required. Mounting the **directory** instead
-of individual files avoids Docker's "missing source file becomes a directory" trap and
-makes the pair easy to copy.
+Mounting the **directory** instead of individual files avoids Docker's "missing source
+file becomes a directory" trap and makes the pair easy to copy.
+
+**macOS:** the script creates the links directly:
+
+```
+Server/auth.key  ->  ../data/auth/auth.key
+Server/auth.enc  ->  ../data/auth/auth.enc
+```
 
 Once you authenticate with `/auth login device`, the server writes the token directly
-into `data/auth/auth.enc` on the host. It persists across all restarts, rebuilds, and
-folder copies.
+into `data/auth/auth.enc`. It persists across all restarts, rebuilds, and folder copies.
+The server may refresh `auth.enc` while it runs; copy the whole `data/` folder to keep
+another installation in sync.
 
 ---
 
 ## Common Commands
+
+Linux:
 
 ```bash
 # Start in background
