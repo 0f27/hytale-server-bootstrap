@@ -352,6 +352,7 @@ macos_server_running() {
 }
 
 macos_stop() {
+    local i
     if ! macos_server_running; then
         ok "Hytale server is not running."
         screen -wipe >/dev/null 2>&1 || true
@@ -360,17 +361,23 @@ macos_stop() {
     info "Stopping Hytale server..."
     if screen -ls 2>/dev/null | grep -q "[.]${SCREEN_NAME}[[:space:]]"; then
         screen -S "$SCREEN_NAME" -p 0 -X stuff $'/stop\n' 2>/dev/null || true
-        local i
-        for i in $(seq 1 20); do
+        for i in $(seq 1 10); do
             if ! macos_server_running; then break; fi
             sleep 1
         done
     fi
     if macos_server_running; then
-        warn "Server did not stop cleanly; terminating the Java process."
+        info "Console stop was not accepted; sending SIGTERM so the server can save."
         pkill -TERM -f '[H]ytaleServer.jar' 2>/dev/null || true
-        sleep 3
+        for i in $(seq 1 15); do
+            if ! macos_server_running; then break; fi
+            sleep 1
+        done
+    fi
+    if macos_server_running; then
+        warn "Server still running; sending SIGKILL."
         pkill -KILL -f '[H]ytaleServer.jar' 2>/dev/null || true
+        sleep 1
     fi
     screen -S "$SCREEN_NAME" -X quit 2>/dev/null || true
     screen -wipe >/dev/null 2>&1 || true
